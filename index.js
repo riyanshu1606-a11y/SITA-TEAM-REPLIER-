@@ -1,118 +1,158 @@
 const TelegramBot = require("node-telegram-bot-api");
 
 const token = process.env.BOT_TOKEN;
-
-if (!token) {
-  throw new Error("BOT_TOKEN is missing from Render environment variables.");
-}
+if (!token) throw new Error("BOT_TOKEN is missing!");
 
 const bot = new TelegramBot(token, { polling: true });
 
-const replies = [
-  {
-    keywords: ["hello", "hey", "hii", "hi"],
-    answer: "👋 Welcome to SITA Team! Type /help to see what I can answer."
-  },
-  {
-    keywords: ["salary", "payment", "payout"],
-    answer: "💰 For individual salary and payment updates, contact your authorized team manager."
-  },
-  {
-    keywords: ["reward", "rewards", "bonus", "bonuses"],
-    answer: "🎁 Check the latest official SITA Team announcement for current rewards, eligibility and deadlines."
-  },
-  {
-    keywords: ["referral", "refer", "invite", "invitation"],
-    answer: "👥 Check the official referral rules for current requirements and reward conditions."
-  },
-  {
-    keywords: ["report", "reporting", "screenshot"],
-    answer: "📋 Submit genuine reports and required screenshots within your assigned deadline."
-  },
-  {
-    keywords: ["rules", "warning", "policy"],
-    answer: "📌 Follow official team instructions, submit accurate reports and inform your manager about leave."
-  },
-  {
-    keywords: ["leave", "absent", "holiday"],
-    answer: "🗓️ Inform your team manager and follow the official leave procedure."
-  },
-  {
-    keywords: ["task", "tasks", "duty"],
-    answer: "✅ Follow the latest task instructions and deadlines from your authorized team manager."
-  },
-  {
-    keywords: ["admin", "manager", "support", "help"],
-    answer: "🛟 Contact an authorized SITA Team manager for account-specific assistance."
-  }
-];
-
+const pending = new Map();
 const cooldowns = new Map();
 
+const replies = [
+  { keys: ["salary", "payment", "payout"],
+    answer: "💰 For salary updates, contact your authorized team manager.\n\n🇮🇳 सैलरी की जानकारी के लिए अपने टीम मैनेजर से संपर्क करें।" },
+  { keys: ["reward", "rewards", "bonus"],
+    answer: "🎁 Please check the latest official SITA Team reward announcement.\n\n🇮🇳 नए रिवॉर्ड की जानकारी के लिए SITA टीम का आधिकारिक अनाउंसमेंट देखें।" },
+  { keys: ["referral", "refer", "invite"],
+    answer: "👥 Please check the official referral rules.\n\n🇮🇳 रेफरल के नियमों के लिए आधिकारिक अनाउंसमेंट देखें।" },
+  { keys: ["report", "screenshot"],
+    answer: "📋 Submit genuine reports within your assigned deadline.\n\n🇮🇳 अपनी रिपोर्ट समय पर और सही जानकारी के साथ जमा करें।" },
+  { keys: ["rules", "policy"],
+    answer: "📌 Please follow the official SITA Team rules.\n\n🇮🇳 कृपया SITA टीम के आधिकारिक नियमों का पालन करें।" }
+];
+
+// Welcome every new human member.
+bot.on("new_chat_members", async (msg) => {
+  for (const member of msg.new_chat_members || []) {
+    if (member.is_bot) continue;
+
+    const welcome =
+      `🎉 WELCOME TO SITA TEAM!\n\n` +
+      `Hello and welcome! 👋\n\n` +
+      `1. Are you a New User or an Existing User?\n\n` +
+      `2. What is your Invitation Code?\n\n` +
+      `━━━━━━━━━━━━━━━━━━\n\n` +
+      `🎉 SITA टीम में आपका स्वागत है!\n\n` +
+      `नमस्ते! 👋\n\n` +
+      `1. क्या आप नए यूज़र हैं या पुराने यूज़र?\n\n` +
+      `2. आपका Invitation Code क्या है?`;
+
+    await bot.sendMessage(msg.chat.id, welcome, {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "🆕 New User / नया यूज़र", callback_data: "type:new" },
+          { text: "👤 Existing User / पुराना यूज़र", callback_data: "type:existing" }
+        ]]
+      }
+    });
+  }
+});
+
+// Handle user-type buttons.
+bot.on("callback_query", async (query) => {
+  const data = query.data || "";
+  if (!data.startsWith("type:")) return;
+
+  const chat = query.message?.chat;
+  if (!chat || !["group", "supergroup"].includes(chat.type)) {
+    await bot.answerCallbackQuery(query.id);
+    return;
+  }
+
+  const type = data.slice(5);
+  const key = `${chat.id}:${query.from.id}`;
+
+  pending.set(key, { type, waiting: true });
+
+  await bot.answerCallbackQuery(query.id, {
+    text: type === "new" ? "New User selected!" : "Existing User selected!"
+  });
+
+  await bot.sendMessage(
+    chat.id,
+    type === "new"
+      ? "🆕 You selected: NEW USER\n\n🇬🇧 Please enter your invitation code.\n🇮🇳 कृपया अपना Invitation Code भेजें।"
+      : "👤 You selected: EXISTING USER\n\n🇬🇧 Please enter your invitation code.\n🇮🇳 कृपया अपना Invitation Code भेजें।"
+  );
+});
+
+// Commands.
 bot.onText(/^\/start(?:@\w+)?(?:\s|$)/i, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "👋 Welcome to SITA Team Assistant!\n\nI answer common questions about salary, rewards, referrals, reports and tasks.\n\nUse /help to see available commands."
-  ).catch(console.error);
+  bot.sendMessage(msg.chat.id,
+    "👋 Welcome to SITA Team Assistant!\n\nUse /help for available topics.");
 });
 
 bot.onText(/^\/help(?:@\w+)?(?:\s|$)/i, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "🤖 SITA TEAM REPLIER\n\n" +
-    "/help - Show help\n" +
-    "/salary - Salary information\n" +
-    "/rewards - Reward information\n" +
-    "/rules - Team rules\n\n" +
-    "Ask a question using keywords such as salary, bonus, referral, report or leave."
-  ).catch(console.error);
+  bot.sendMessage(msg.chat.id,
+    "🤖 SITA TEAM ASSISTANT\n\n" +
+    "/help - Help\n/salary - Salary information\n" +
+    "/rewards - Reward information\n\n" +
+    "Ask about salary, rewards, referral, reports or rules.");
 });
 
 bot.onText(/^\/salary(?:@\w+)?(?:\s|$)/i, (msg) => {
-  bot.sendMessage(msg.chat.id, replies[1].answer).catch(console.error);
+  bot.sendMessage(msg.chat.id, replies[0].answer);
 });
 
 bot.onText(/^\/rewards(?:@\w+)?(?:\s|$)/i, (msg) => {
-  bot.sendMessage(msg.chat.id, replies[2].answer).catch(console.error);
+  bot.sendMessage(msg.chat.id, replies[1].answer);
 });
 
-bot.onText(/^\/rules(?:@\w+)?(?:\s|$)/i, (msg) => {
-  bot.sendMessage(msg.chat.id, replies[5].answer).catch(console.error);
-});
-
+// Process invitation codes and keyword questions.
 bot.on("message", async (msg) => {
-  if (!msg.text || msg.from?.is_bot) return;
-  if (!["group", "supergroup"].includes(msg.chat.type)) return;
-
-  const text = msg.text.trim().toLowerCase();
-  if (text.startsWith("/")) return;
-
-  const words = text.match(/[a-z0-9]+/g) || [];
-
-  const matched = replies.find((item) =>
-    item.keywords.some((keyword) => words.includes(keyword))
-  );
-
-  if (!matched) return;
-
-  const key = `${msg.chat.id}:${msg.from.id}`;
-  const now = Date.now();
-
-  if (now - (cooldowns.get(key) || 0) < 4000) return;
-  cooldowns.set(key, now);
-
   try {
+    if (!msg.text || msg.from?.is_bot) return;
+    if (!["group", "supergroup"].includes(msg.chat.type)) return;
+
+    const text = msg.text.trim();
+    const key = `${msg.chat.id}:${msg.from.id}`;
+
+    if (text.startsWith("/")) return;
+
+    // If this member selected a user type, treat their next message as the code.
+    if (pending.has(key)) {
+      const details = pending.get(key);
+
+      if (text.length > 100) {
+        await bot.sendMessage(msg.chat.id,
+          "Please send a valid invitation code.\nकृपया सही Invitation Code भेजें।");
+        return;
+      }
+
+      pending.delete(key);
+
+      await bot.sendMessage(msg.chat.id,
+        `✅ INFORMATION RECEIVED\n\n` +
+        `User Type: ${details.type === "new" ? "New User" : "Existing User"}\n` +
+        `Invitation Code: ${text}\n\n` +
+        `🇮🇳 धन्यवाद! आपकी जानकारी प्राप्त हो गई है।`
+      );
+      return;
+    }
+
+    // Match whole words to avoid accidental matches inside other words.
+    const words = text.toLowerCase().match(/[a-z0-9]+/g) || [];
+    const matched = replies.find(item =>
+      item.keys.some(word => words.includes(word))
+    );
+
+    if (!matched) return;
+
+    const now = Date.now();
+    if (now - (cooldowns.get(key) || 0) < 4000) return;
+
+    cooldowns.set(key, now);
     await bot.sendMessage(msg.chat.id, matched.answer, {
       reply_parameters: { message_id: msg.message_id },
       allow_sending_without_reply: true
     });
   } catch (error) {
-    console.error("Reply failed:", error.message);
+    console.error("Message error:", error.message);
   }
 });
 
-bot.on("polling_error", (error) => {
-  console.error("Telegram polling error:", error.message);
+bot.on("polling_error", (err) => {
+  console.error("Telegram polling error:", err.message);
 });
 
-console.log("SITA Team Reply Bot is running!");
+console.log("SITA Team Welcome & Reply Bot is running!");
